@@ -2,11 +2,35 @@
 
 import { useState, useRef, useCallback } from "react";
 import Link from "next/link";
-import { analyzeText, analyzeYoutube, analyzeVideo } from "./lib/api";
-import type { AnalysisResult } from "./lib/types";
+import { analyzeText, analyzeYoutube, analyzeVideo, getJobs, getJobDetail, deleteJob, pollJob, transformResponse } from "./lib/api";
+import type { AnalysisResult, JobMetadata, JobDetail, MetricKey, Segment } from "./lib/types";
 import { METRIC_KEYS, METRIC_COLORS, METRIC_LABELS } from "./lib/types";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  ReferenceDot,
+  Label,
+} from "recharts";
 
-type InputMode = "text" | "youtube" | "upload" | "load";
+/** Find the peak segment for a metric */
+function findPeak(
+  segments: Segment[],
+  key: MetricKey
+): { timestep: number; value: number } {
+  let best = segments[0];
+  for (const seg of segments) {
+    if (seg[key] > best[key]) best = seg;
+  }
+  return { timestep: best.timestep, value: best[key] };
+}
+
+type InputMode = "text" | "youtube" | "upload" | "load" | "jobs";
 
 function getYouTubeEmbedUrl(url: string): string | null {
   try {
@@ -45,6 +69,89 @@ export default function HomePage() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
+
+  const [jobs, setJobs] = useState<JobMetadata[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+
+  const [visibleMetrics, setVisibleMetrics] = useState<Set<MetricKey>>(
+    new Set(METRIC_KEYS)
+  );
+
+  const toggleMetric = useCallback((key: MetricKey) => {
+    setVisibleMetrics((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        if (next.size > 1) next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const peaks = result
+    ? METRIC_KEYS.filter((k) => visibleMetrics.has(k)).map((key) => ({
+        key,
+        ...findPeak(result.segments, key),
+      }))
+    : [];
+
+  const fetchJobs = useCallback(async () => {
+    setLoadingJobs(true);
+    setJobsError(null);
+    try {
+      const data = await getJobs();
+      setJobs(data);
+    } catch (err) {
+      setJobsError(err instanceof Error ? err.message : "Failed to load jobs");
+    } finally {
+      setLoadingJobs(false);
+    }
+  }, []);
+
+  const handleTabChange = useCallback((newMode: InputMode) => {
+    setMode(newMode);
+    if (newMode === "jobs") {
+      fetchJobs();
+    }
+  }, [fetchJobs]);
+
+  const handleSelectJob = useCallback(async (jobId: string) => {
+    setError(null);
+    setLoading(true);
+    try {
+      const job = await getJobDetail(jobId);
+      if (job.status === "completed" && job.result) {
+        const transformed = transformResponse(job.result, job.payload?.youtube_url);
+        setResult(transformed);
+      } else if (job.status === "failed") {
+        throw new Error(job.error || "Selected job has failed.");
+      } else {
+        const res = await pollJob(jobId);
+        setResult(res);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load job details");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleDeleteJob = useCallback(async (e: React.MouseEvent, jobId: string) => {
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this job?")) return;
+    try {
+      const success = await deleteJob(jobId);
+      if (success) {
+        setJobs((prev) => prev.filter((j) => j.job_id !== jobId));
+      } else {
+        alert("Failed to delete job.");
+      }
+    } catch (err) {
+      alert("Error deleting job: " + err);
+    }
+  }, []);
 
   const handleAnalyze = useCallback(async () => {
     setError(null);
@@ -110,6 +217,7 @@ export default function HomePage() {
     { key: "youtube", label: "YouTube", icon: "▶️" },
     { key: "upload", label: "Upload", icon: "📁" },
     { key: "load", label: "Load JSON", icon: "📊" },
+    { key: "jobs", label: "Jobs", icon: "⏱️" },
   ];
 
   // ─── FULL-SCREEN LOADING STATE ────────────────────────────────────
@@ -219,7 +327,7 @@ export default function HomePage() {
           {tabs.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => setMode(tab.key)}
+              onClick={() => handleTabChange(tab.key)}
               className={`flex-1 py-3 px-3 rounded-xl text-sm font-medium border transition-all cursor-pointer ${
                 mode === tab.key
                   ? "tab-active text-foreground"
@@ -315,8 +423,107 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Analyze Button (not shown for load mode) */}
-        {mode !== "load" && (
+        {/* Jobs list */}
+        {mode === "jobs" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-muted uppercase tracking-wider">
+                Current & Past Jobs
+              </h3>
+              <button
+                onClick={fetchJobs}
+                disabled={loadingJobs}
+                className="text-xs text-accent-light hover:text-accent border border-card-border hover:border-accent/40 px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
+              >
+                🔄 Refresh
+              </button>
+            </div>
+
+            {loadingJobs && (
+              <div className="text-center py-8">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-accent mb-2"></div>
+                <p className="text-muted text-sm">Fetching jobs...</p>
+              </div>
+            )}
+
+            {jobsError && (
+              <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                {jobsError}
+              </div>
+            )}
+
+            {!loadingJobs && !jobsError && jobs.length === 0 && (
+              <div className="text-center py-12 border-2 border-dashed border-card-border rounded-xl">
+                <p className="text-muted text-sm">No analysis jobs found.</p>
+                <p className="text-muted/50 text-xs mt-1">Submit an analysis to start a job.</p>
+              </div>
+            )}
+
+            {!loadingJobs && !jobsError && jobs.length > 0 && (
+              <div className="max-h-[350px] overflow-y-auto pr-1 space-y-2.5">
+                {jobs.map((job) => (
+                  <div
+                    key={job.job_id}
+                    onClick={() => handleSelectJob(job.job_id)}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-card-border bg-white/[0.02] hover:bg-white/[0.05] cursor-pointer transition-all"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${
+                          job.status === "completed" ? "bg-green-500/10 text-green-400 border border-green-500/20" :
+                          job.status === "failed" ? "bg-red-500/10 text-red-400 border border-red-500/20" :
+                          job.status === "processing" ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 animate-pulse" :
+                          "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20"
+                        }`}>
+                          {job.status.toUpperCase()}
+                        </span>
+                        <span className="text-xs text-muted uppercase font-mono bg-white/5 px-1.5 py-0.5 rounded">
+                          {job.type}
+                        </span>
+                        <span className="text-xs text-muted/60 font-mono hidden sm:inline">
+                          id: {job.job_id.slice(0, 8)}...
+                        </span>
+                      </div>
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {job.type === "text" && (job.payload?.text || "Text Analysis")}
+                        {job.type === "youtube" && (job.payload?.youtube_url || "YouTube Video")}
+                        {job.type === "video" && (job.payload?.filename || "Uploaded Video")}
+                      </p>
+                      <p className="text-xs text-muted/60 mt-1">
+                        {new Date(job.created_at).toLocaleString()}
+                      </p>
+                      {job.error && (
+                        <p className="text-xs text-red-400 mt-1 truncate">
+                          Error: {job.error}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 mt-3 sm:mt-0 justify-end">
+                      {job.status === "completed" && (
+                        <Link
+                          href={`/demo?jobId=${job.job_id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs text-cyan-400 hover:text-cyan-300 font-medium px-3 py-1.5 rounded-lg border border-cyan-400/20 hover:border-cyan-400/40 bg-cyan-400/5 transition-all"
+                        >
+                          📊 Visualize
+                        </Link>
+                      )}
+                      <button
+                        onClick={(e) => handleDeleteJob(e, job.job_id)}
+                        className="text-xs text-red-400 hover:text-red-300 border border-red-500/10 hover:border-red-500/30 px-3 py-1.5 rounded-lg cursor-pointer bg-red-500/5 transition-all"
+                      >
+                        🗑️ Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Analyze Button (not shown for load or jobs mode) */}
+        {mode !== "load" && mode !== "jobs" && (
           <button
             id="analyze-button"
             onClick={handleAnalyze}
@@ -400,6 +607,126 @@ export default function HomePage() {
               </a>
             </div>
           )}
+
+          {/* Line Chart */}
+          <div className="mb-8">
+            <h3 className="text-sm text-muted uppercase tracking-wider mb-4">
+              Brain Activation Over Time
+            </h3>
+
+            {/* Legend / Toggle */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              {METRIC_KEYS.map((key) => {
+                const active = visibleMetrics.has(key);
+                return (
+                  <button
+                    key={key}
+                    onClick={() => toggleMetric(key)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+                      active
+                        ? "border-white/20 bg-white/10 text-foreground"
+                        : "border-transparent bg-white/5 text-muted/50"
+                    }`}
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-full"
+                      style={{
+                        backgroundColor: active ? METRIC_COLORS[key] : "#333",
+                      }}
+                    />
+                    {METRIC_LABELS[key]}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Chart Container */}
+            <div className="bg-white/5 rounded-xl p-4">
+              <ResponsiveContainer width="100%" height={320}>
+                <LineChart
+                  data={result.segments}
+                  margin={{ top: 20, right: 30, bottom: 10, left: 10 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(255,255,255,0.05)"
+                  />
+                  <XAxis
+                    dataKey="timestep"
+                    stroke="#64748b"
+                    fontSize={12}
+                    tickLine={false}
+                    label={{
+                      value: "Timestep (seconds)",
+                      position: "insideBottom",
+                      offset: -5,
+                      fill: "#64748b",
+                      fontSize: 11,
+                    }}
+                  />
+                  <YAxis
+                    stroke="#64748b"
+                    fontSize={12}
+                    tickLine={false}
+                    domain={[0, "auto"]}
+                    label={{
+                      value: "Activation",
+                      angle: -90,
+                      position: "insideLeft",
+                      offset: 10,
+                      fill: "#64748b",
+                      fontSize: 11,
+                    }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#0a0a0a",
+                      border: "1px solid rgba(225, 29, 72, 0.3)",
+                      borderRadius: "12px",
+                      fontSize: "12px",
+                      color: "#e2e8f0",
+                    }}
+                    labelFormatter={(val) => `Timestep ${val}s`}
+                  />
+                  <Legend content={() => null} />
+                  {METRIC_KEYS.map((key) => (
+                    <Line
+                      key={key}
+                      type="monotone"
+                      dataKey={key}
+                      name={METRIC_LABELS[key]}
+                      stroke={METRIC_COLORS[key]}
+                      strokeWidth={key === "overall" ? 3 : 2}
+                      strokeDasharray={key === "overall" ? "6 3" : undefined}
+                      dot={false}
+                      activeDot={{ r: 4, strokeWidth: 0 }}
+                      hide={!visibleMetrics.has(key)}
+                    />
+                  ))}
+                  {/* Peak labels */}
+                  {peaks.map((p) => (
+                    <ReferenceDot
+                      key={`peak-${p.key}`}
+                      x={p.timestep}
+                      y={p.value}
+                      r={4}
+                      fill={METRIC_COLORS[p.key]}
+                      stroke="none"
+                    >
+                      <Label
+                        value={`${p.value.toFixed(1)}`}
+                        position="top"
+                        offset={8}
+                        fill={METRIC_COLORS[p.key]}
+                        fontSize={10}
+                        fontWeight={600}
+                      />
+                    </ReferenceDot>
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
 
           {/* Peak Metrics */}
           <div className="mb-6">

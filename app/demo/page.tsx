@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { getJobDetail, transformResponse } from "../lib/api";
 import {
   LineChart,
   Line,
@@ -57,13 +59,40 @@ function findPeak(
   return { timestep: best.timestep, value: best[key] };
 }
 
-export default function DemoPage() {
+function DemoPageContent() {
+  const searchParams = useSearchParams();
+  const jobId = searchParams.get("jobId");
   const [data, setData] = useState<AnalysisResult>(DEMO_DATA);
   const [visibleMetrics, setVisibleMetrics] = useState<Set<MetricKey>>(
     new Set(METRIC_KEYS)
   );
   const jsonRef = useRef<HTMLInputElement>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!jobId) return;
+    setLoading(true);
+    setError(null);
+    getJobDetail(jobId)
+      .then((job) => {
+        if (job.status === "completed" && job.result) {
+          setData(transformResponse(job.result, job.payload?.youtube_url));
+        } else if (job.status === "failed") {
+          setError(job.error || "Selected job has failed.");
+        } else {
+          setError(`Job is currently ${job.status}. Please wait for it to complete.`);
+        }
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Failed to load job details.");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [jobId]);
 
   const toggleMetric = (key: MetricKey) => {
     setVisibleMetrics((prev) => {
@@ -99,11 +128,39 @@ export default function DemoPage() {
         }
       };
       reader.readAsText(f);
-      // Reset so same file can be re-loaded
       e.target.value = "";
     },
     []
   );
+
+  if (loading) {
+    return (
+      <main className="flex-1 flex flex-col items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="text-5xl animate-brain-pulse mb-4">🧠</div>
+          <p className="text-muted text-sm">Loading job data from server...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="flex-1 flex flex-col items-center justify-center px-4 py-16 text-center">
+        <div className="glass-card max-w-md p-6 sm:p-8 glow">
+          <div className="text-5xl mb-4">⚠️</div>
+          <h2 className="text-xl font-bold text-red-400 mb-2">Failed to Load Job</h2>
+          <p className="text-muted text-sm mb-6">{error}</p>
+          <Link
+            href="/"
+            className="inline-block text-xs font-semibold bg-white/10 hover:bg-white/15 px-4 py-2 rounded-lg border border-white/10 transition-colors cursor-pointer"
+          >
+            ← Back to Home
+          </Link>
+        </div>
+      </main>
+    );
+  }
 
   // Compute stats
   const peakTimestep = data.segments.reduce((best, seg) =>
@@ -510,5 +567,20 @@ export default function DemoPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function DemoPage() {
+  return (
+    <Suspense fallback={
+      <main className="flex-1 flex flex-col items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="text-5xl animate-brain-pulse mb-4">🧠</div>
+          <p className="text-muted text-sm">Loading visualization...</p>
+        </div>
+      </main>
+    }>
+      <DemoPageContent />
+    </Suspense>
   );
 }

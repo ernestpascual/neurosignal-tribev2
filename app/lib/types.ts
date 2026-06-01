@@ -48,3 +48,24 @@ export const METRIC_LABELS: Record<MetricKey, string> = {
   Motor: "Motor",
   Visual: "Visual",
 };
+
+export type JobStatus = "pending" | "processing" | "completed" | "failed";
+
+export interface JobMetadata {
+  job_id: string;
+  status: JobStatus;
+  type: "text" | "video" | "youtube";
+  created_at: string;
+  updated_at: string;
+  payload?: {
+    text?: string;
+    youtube_url?: string;
+    filename?: string;
+  };
+  error?: string;
+}
+
+export interface JobDetail extends JobMetadata {
+  result?: Record<string, any>;
+}
+

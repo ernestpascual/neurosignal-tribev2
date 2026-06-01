@@ -1,4 +1,4 @@
-import type { AnalysisResult } from "./types";
+import type { AnalysisResult, JobMetadata, JobDetail } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:7860";
 
@@ -6,7 +6,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:7860";
  * Transform the standard API response into the AnalysisResult shape
  * (matching chowking.json format).
  */
-function transformResponse(
+export function transformResponse(
   data: Record<string, unknown>,
   inputUrl?: string
 ): AnalysisResult {
@@ -29,6 +29,51 @@ function transformResponse(
   };
 }
 
+export async function pollJob(jobId: string): Promise<AnalysisResult> {
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  while (true) {
+    const res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || "Failed to fetch job status");
+    }
+    const job = data.job;
+    if (job.status === "completed") {
+      return transformResponse(job.result, job.payload?.youtube_url);
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || "Analysis job failed");
+    }
+    await delay(3000); // Poll every 3 seconds
+  }
+}
+
+export async function getJobs(): Promise<JobMetadata[]> {
+  const res = await fetch(`${API_BASE}/api/jobs`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Failed to fetch jobs");
+  return data.jobs;
+}
+
+export async function getJobDetail(jobId: string): Promise<JobDetail> {
+  const res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Failed to fetch job detail");
+  return data.job;
+}
+
+export async function deleteJob(jobId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/api/jobs/${jobId}`, {
+      method: "DELETE",
+    });
+    const data = await res.json();
+    return data.success;
+  } catch {
+    return false;
+  }
+}
+
 export async function analyzeText(text: string): Promise<AnalysisResult> {
   const form = new FormData();
   form.append("text", text);
@@ -39,8 +84,8 @@ export async function analyzeText(text: string): Promise<AnalysisResult> {
   });
 
   const data = await res.json();
-  if (!data.success) throw new Error(data.error || "Analysis failed");
-  return transformResponse(data);
+  if (!data.success) throw new Error(data.error || "Analysis submission failed");
+  return pollJob(data.job_id);
 }
 
 export async function analyzeYoutube(url: string): Promise<AnalysisResult> {
@@ -53,8 +98,8 @@ export async function analyzeYoutube(url: string): Promise<AnalysisResult> {
   });
 
   const data = await res.json();
-  if (!data.success) throw new Error(data.error || "Analysis failed");
-  return transformResponse(data, url);
+  if (!data.success) throw new Error(data.error || "Analysis submission failed");
+  return pollJob(data.job_id);
 }
 
 export async function analyzeVideo(file: File): Promise<AnalysisResult> {
@@ -67,6 +112,7 @@ export async function analyzeVideo(file: File): Promise<AnalysisResult> {
   });
 
   const data = await res.json();
-  if (!data.success) throw new Error(data.error || "Analysis failed");
-  return transformResponse(data);
+  if (!data.success) throw new Error(data.error || "Analysis submission failed");
+  return pollJob(data.job_id);
 }
+
