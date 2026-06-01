@@ -187,7 +187,33 @@ export default function HomePage() {
       const reader = new FileReader();
       reader.onload = (ev) => {
         try {
-          const data = JSON.parse(ev.target?.result as string) as AnalysisResult;
+          const parsed = JSON.parse(ev.target?.result as string);
+          let data: AnalysisResult;
+
+          if (
+            parsed &&
+            typeof parsed === "object" &&
+            "result" in parsed &&
+            parsed.result &&
+            typeof parsed.result === "object"
+          ) {
+            // Raw backend job structure
+            const payload = (parsed as any).payload || {};
+            const resultData = (parsed as any).result;
+            data = transformResponse(
+              resultData,
+              payload.youtube_url || payload.youtubeUrl,
+              payload.text
+            );
+          } else if (parsed && typeof parsed === "object" && parsed.segments && parsed.summary) {
+            // Standard client format
+            data = parsed as AnalysisResult;
+          } else {
+            throw new Error(
+              "Invalid format — JSON must be a valid AnalysisResult (with segments and summary) or a backend Job JSON (with result containing chart_data)."
+            );
+          }
+
           if (!data.segments || !data.summary) {
             throw new Error("Invalid format — missing segments or summary.");
           }
@@ -202,6 +228,7 @@ export default function HomePage() {
         }
       };
       reader.readAsText(f);
+      e.target.value = "";
     },
     []
   );
