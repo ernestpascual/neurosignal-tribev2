@@ -123,7 +123,7 @@ export default function HomePage() {
     try {
       const job = await getJobDetail(jobId);
       if (job.status === "completed" && job.result) {
-        const transformed = transformResponse(job.result, job.payload?.youtube_url);
+        const transformed = transformResponse(job.result, job.payload?.youtube_url, job.payload?.text);
         setResult(transformed);
       } else if (job.status === "failed") {
         throw new Error(job.error || "Selected job has failed.");
@@ -608,6 +608,17 @@ export default function HomePage() {
             </div>
           )}
 
+          {result.text && (
+            <div className="mb-6">
+              <p className="text-sm text-muted mb-1">Analyzed Text</p>
+              <div className="bg-white/5 rounded-xl p-4 border border-card-border max-h-48 overflow-y-auto">
+                <p className="text-foreground text-sm font-mono whitespace-pre-wrap leading-relaxed">
+                  {result.text}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Line Chart */}
           <div className="mb-8">
             <h3 className="text-sm text-muted uppercase tracking-wider mb-4">
@@ -755,6 +766,148 @@ export default function HomePage() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Data Table */}
+          <div className="mb-8">
+            <h3 className="text-sm text-muted uppercase tracking-wider mb-4">
+              All Timestep Values
+            </h3>
+            <div className="overflow-x-auto rounded-xl border border-card-border max-h-64 overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-white/5 sticky top-0 backdrop-blur-md">
+                    <th className="px-4 py-3 text-left font-medium text-accent-light">
+                      Time
+                    </th>
+                    {METRIC_KEYS.map((key) => (
+                      <th
+                        key={key}
+                        className="px-4 py-3 text-left font-medium"
+                        style={{ color: METRIC_COLORS[key] }}
+                      >
+                        {METRIC_LABELS[key]}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.segments.map((seg, i) => (
+                    <tr
+                      key={seg.timestep}
+                      className={`border-t border-card-border ${
+                        i % 2 === 0 ? "" : "bg-white/[0.02]"
+                      }`}
+                    >
+                      <td className="px-4 py-2.5 font-mono text-xs text-accent-light font-medium">
+                        t={seg.timestep}
+                      </td>
+                      {METRIC_KEYS.map((key) => (
+                        <td
+                          key={key}
+                          className="px-4 py-2.5 font-mono text-xs"
+                          style={{ color: METRIC_COLORS[key] }}
+                        >
+                          {seg[key].toFixed(2)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Metric Explainer */}
+          <div className="mt-8 mb-8">
+            <h3 className="text-sm text-muted uppercase tracking-wider mb-4">
+              Understanding the Metrics
+            </h3>
+            <p className="text-muted text-sm mb-4 leading-relaxed">
+              Each metric represents predicted BOLD signal fluctuations (standard
+              deviations × 100) in a specific brain network. The raw model outputs
+              are typically between <strong className="text-foreground">−3.0 to +3.0</strong> standard deviations per vertex.
+              After taking the absolute value, averaging across all vertices in a region,
+              and scaling by 100, the final values typically fall in the
+              range <strong className="text-foreground">5.0 to 30.0</strong>.
+            </p>
+            <div className="grid grid-cols-3 gap-3 mb-5">
+              <div className="bg-white/5 rounded-xl p-3 text-center">
+                <p className="text-lg font-bold text-green-400">5 – 10</p>
+                <p className="text-xs text-muted mt-1 text-[10px] leading-tight">Low activation — resting or minimal stimulus</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 text-center">
+                <p className="text-lg font-bold text-amber-400">10 – 18</p>
+                <p className="text-xs text-muted mt-1 text-[10px] leading-tight">Moderate — typical range for engaging content</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 text-center">
+                <p className="text-lg font-bold text-red-400">18 – 30</p>
+                <p className="text-xs text-muted mt-1 text-[10px] leading-tight">High — intense, highly stimulating moments</p>
+              </div>
+            </div>
+            <p className="text-muted text-xs mb-5 leading-relaxed">
+              For example, a Visual score of <strong className="text-foreground">15.0</strong> means the visual cortex vertices
+              are deviating by an average of 0.15 standard deviations from their resting baseline —
+              indicating moderate visual engagement. A score above 19 would indicate a highly stimulating visual moment.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-white/5 rounded-xl p-4 border-l-2" style={{ borderLeftColor: METRIC_COLORS.overall }}>
+                <h4 className="font-semibold text-sm mb-1" style={{ color: METRIC_COLORS.overall }}>
+                  Overall
+                </h4>
+                <p className="text-muted text-xs leading-relaxed">
+                  The global average activation across the entire brain surface. Gives a quick snapshot of how generally stimulating the content is at any given second.
+                </p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4 border-l-2" style={{ borderLeftColor: METRIC_COLORS.Attention }}>
+                <h4 className="font-semibold text-sm mb-1" style={{ color: METRIC_COLORS.Attention }}>
+                  Attention
+                </h4>
+                <p className="text-muted text-xs leading-relaxed">
+                  Focus and spatial awareness centers (prefrontal & parietal cortex). Spikes when the content requires the viewer to actively track moving objects, read text, or focus on a specific point.
+                </p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4 border-l-2" style={{ borderLeftColor: METRIC_COLORS.Auditory }}>
+                <h4 className="font-semibold text-sm mb-1" style={{ color: METRIC_COLORS.Auditory }}>
+                  Auditory
+                </h4>
+                <p className="text-muted text-xs leading-relaxed">
+                  Auditory cortex activation in the temporal lobe. Spikes during dialogue, loud sound effects, music transitions, or any acoustically rich moment.
+                </p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4 border-l-2" style={{ borderLeftColor: METRIC_COLORS.Emotion }}>
+                <h4 className="font-semibold text-sm mb-1" style={{ color: METRIC_COLORS.Emotion }}>
+                  Emotion
+                </h4>
+                <p className="text-muted text-xs leading-relaxed">
+                  Limbic system and emotional processing centers (e.g. amygdala). Indicates how emotionally stimulating or evocative the content is predicted to be — humor, surprise, tension, or sentimentality.
+                </p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4 border-l-2" style={{ borderLeftColor: METRIC_COLORS.Language }}>
+                <h4 className="font-semibold text-sm mb-1" style={{ color: METRIC_COLORS.Language }}>
+                  Language
+                </h4>
+                <p className="text-muted text-xs leading-relaxed">
+                  Language comprehension areas (Wernicke COMPREHENSION & Broca SPEECH areas). Spikes when someone is speaking clearly, when text appears on screen, or during narration and voiceover.
+                </p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4 border-l-2" style={{ borderLeftColor: METRIC_COLORS.Motor }}>
+                <h4 className="font-semibold text-sm mb-1" style={{ color: METRIC_COLORS.Motor }}>
+                  Motor
+                </h4>
+                <p className="text-muted text-xs leading-relaxed">
+                  Motor cortex activation. Due to the brain's mirror neuron system, this spikes when watching physical actions — running, dancing, hand gestures — even when the viewer is sitting completely still.
+                </p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4 border-l-2 sm:col-span-2" style={{ borderLeftColor: METRIC_COLORS.Visual }}>
+                <h4 className="font-semibold text-sm mb-1" style={{ color: METRIC_COLORS.Visual }}>
+                  Visual
+                </h4>
+                <p className="text-muted text-xs leading-relaxed">
+                  Visual cortex in the occipital lobe, responsible for processing what the eyes are seeing. Typically the highest value since video content is inherently visual. Spikes during scene changes, fast motion, bright colors, and visually complex frames.
+                </p>
+              </div>
             </div>
           </div>
 

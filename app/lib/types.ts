@@ -12,6 +12,7 @@ export interface Segment {
 export interface AnalysisResult {
   summary: string;
   youtubeUrl?: string;
+  text?: string;
   timestamps: number;
   statusInfo: string;
   segments: Segment[];

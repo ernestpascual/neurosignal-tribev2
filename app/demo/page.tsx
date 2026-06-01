@@ -79,7 +79,7 @@ function DemoPageContent() {
     getJobDetail(jobId)
       .then((job) => {
         if (job.status === "completed" && job.result) {
-          setData(transformResponse(job.result, job.payload?.youtube_url));
+          setData(transformResponse(job.result, job.payload?.youtube_url, job.payload?.text));
         } else if (job.status === "failed") {
           setError(job.error || "Selected job has failed.");
         } else {
@@ -281,6 +281,19 @@ function DemoPageContent() {
             <p className="text-sm text-foreground mt-1">{data.statusInfo}</p>
           </div>
         </div>
+
+        {data.text && (
+          <div className="mb-6">
+            <h2 className="text-sm text-muted uppercase tracking-wider mb-2">
+              Analyzed Text
+            </h2>
+            <div className="bg-white/5 rounded-xl p-4 border border-card-border max-h-48 overflow-y-auto">
+              <p className="text-foreground text-sm font-mono whitespace-pre-wrap leading-relaxed">
+                {data.text}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Quick Stats */}
         <div className="grid grid-cols-3 gap-4 mb-8">

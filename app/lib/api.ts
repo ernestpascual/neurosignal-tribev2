@@ -8,12 +8,14 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:7860";
  */
 export function transformResponse(
   data: Record<string, unknown>,
-  inputUrl?: string
+  inputUrl?: string,
+  inputText?: string
 ): AnalysisResult {
   const chartData = (data.chart_data || []) as Record<string, number>[];
   return {
     summary: (data.agent_summary as string) || "",
     youtubeUrl: inputUrl || undefined,
+    text: inputText || (data.text as string) || undefined,
     timestamps: (data.total_timesteps as number) || chartData.length,
     statusInfo: (data.statusInfo as string) || "",
     segments: chartData.map((point) => ({
@@ -39,7 +41,7 @@ export async function pollJob(jobId: string): Promise<AnalysisResult> {
     }
     const job = data.job;
     if (job.status === "completed") {
-      return transformResponse(job.result, job.payload?.youtube_url);
+      return transformResponse(job.result, job.payload?.youtube_url, job.payload?.text);
     }
     if (job.status === "failed") {
       throw new Error(job.error || "Analysis job failed");
