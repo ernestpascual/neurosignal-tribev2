@@ -2,6 +2,8 @@
 
 NeuroSignal is a modern, responsive React/Next.js frontend designed to interface with the **TRIBE v2 Neural Responses API** (`tribev2server`). It allows you to input content (text, video, or YouTube URLs) and visualize how the human brain is predicted to react to it over time.
 
+🚀 **Live Demo**: This is currently deployed as a demo at [https://neurosignalfrontend.vercel.app/demo](https://neurosignalfrontend.vercel.app/demo)
+
 ## ⚠️ Important Note
 
 This frontend is designed to communicate with the locally-hosted Python FastAPI server running the [TRIBE v2 meta-model](https://github.com/ernestpascual/tribev2-experiment).
